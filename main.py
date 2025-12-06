@@ -9,7 +9,7 @@ from transformers import pipeline
 
 # --------------------------------------------------------------------
 # Disable FlashAttention if your hardware does not support it
-# --------------------------------------------------------------------
+# -------------------------------------------------------------------- 
 os.environ.setdefault("FLASH_ATTENTION", "1")
 os.environ.setdefault("DISABLE_FLASH_ATTENTION", "0")
 os.environ.setdefault("HF_DISABLE_FLASH_ATTENTION", "0")
