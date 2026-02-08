@@ -2,37 +2,29 @@
 import os
 import re
 import torch
-import asyncio
 from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import pipeline
 
 # --------------------------------------------------------------------
-# Environment tuning (important for large MIG inference)
-# --------------------------------------------------------------------
-os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+# Disable FlashAttention if your hardware does not support it
+# -------------------------------------------------------------------- 
+os.environ.setdefault("FLASH_ATTENTION", "1")
+os.environ.setdefault("DISABLE_FLASH_ATTENTION", "0")
+os.environ.setdefault("HF_DISABLE_FLASH_ATTENTION", "0")
 
 # --------------------------------------------------------------------
-# Load GPT-OSS-20B across multiple GPUs
+# Load GPT-OSS-20B Pipeline
 # --------------------------------------------------------------------
 MODEL_NAME = "openai/gpt-oss-20b"
 
-print("Loading tokenizer...")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-
-print("Loading model across multiple GPUs... (this takes a while)")
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
+pipe = pipeline(
+    "text-generation",
+    model=MODEL_NAME,
+    device_map="auto",
     torch_dtype=torch.bfloat16,
-    device_map="balanced",          # <-- splits model across both MIG GPUs
-    low_cpu_mem_usage=True
 )
-
-model.eval()
-print("Model loaded successfully")
 
 # --------------------------------------------------------------------
 # FastAPI Application
@@ -74,51 +66,39 @@ def build_prompt(system, developer, user):
     )
 
 # --------------------------------------------------------------------
-# Extract ONLY the final channel
+# Extract ONLY the final channel (ZERO analysis leakage)
 # --------------------------------------------------------------------
-FINAL_RE = re.compile(r"<\|channel\|>final<\|message\|>(.*)", re.S)
+FINAL_RE = re.compile(
+    r"<\|channel\|>final<\|message\|>(.*)",
+    re.S
+)
 
-# --------------------------------------------------------------------
-# Inference (runs off event loop)
-# --------------------------------------------------------------------
-def run_inference(user_prompt: str):
+@app.post("/ask_gptoss")
+async def ask_gptoss(prompt: str = Form(...)):
 
     system_msg = "You are a world-class Earth Observation analyst. Reasoning: high."
     developer_msg = "Always respond with EO-standard terminology. NEVER output analysis, only final results."
+    
+    harmony_prompt = build_prompt(system_msg, developer_msg, prompt)
 
-    harmony_prompt = build_prompt(system_msg, developer_msg, user_prompt)
+    # Get model output (NO prompt echo)
+    out = pipe(harmony_prompt, max_new_tokens=512, return_full_text=False, do_sample=False)
 
-    # Tokenize safely across sharded GPUs
-    inputs = tokenizer(harmony_prompt, return_tensors="pt")
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    raw = out[0]["generated_text"]
 
-    with torch.inference_mode():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=512,
-            do_sample=False,
-            pad_token_id=tokenizer.eos_token_id
-        )
-
-    raw = tokenizer.decode(outputs[0], skip_special_tokens=False)
-
-    # Extract final channel
+    # Extract <|channel|>final
     m = FINAL_RE.search(raw)
     if not m:
+        # fallback: remove Harmony control tokens
         cleaned = re.sub(r"<\|.*?\|>", "", raw).strip()
         return JSONResponse({"response": cleaned})
 
     final_text = m.group(1).strip()
+
+    # Remove any rogue analysis if model attempted to slip it in
     final_text = re.sub(r"<\|channel\|>analysis.*", "", final_text, flags=re.S).strip()
 
     return JSONResponse({"response": final_text})
-
-# --------------------------------------------------------------------
-# API Endpoint (non-blocking)
-# --------------------------------------------------------------------
-@app.post("/ask_gptoss")
-async def ask_gptoss(prompt: str = Form(...)):
-    return await asyncio.to_thread(run_inference, prompt)
 
 # --------------------------------------------------------------------
 # Health Endpoint
