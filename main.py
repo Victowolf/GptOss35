@@ -9,33 +9,47 @@ from fastapi.responses import JSONResponse
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # --------------------------------------------------------------------
-# Environment tuning (important for large MIG inference)
+# Environment tuning (important for MIG + offload inference)
 # --------------------------------------------------------------------
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-# --------------------------------------------------------------------
-# Load GPT-OSS-20B across multiple GPUs
-# --------------------------------------------------------------------
 MODEL_NAME = "openai/gpt-oss-20b"
+OFFLOAD_DIR = "offload"
+os.makedirs(OFFLOAD_DIR, exist_ok=True)
 
+# --------------------------------------------------------------------
+# Load tokenizer
+# --------------------------------------------------------------------
 print("Loading tokenizer...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-print("Loading model across multiple GPUs... (this takes a while)")
+# --------------------------------------------------------------------
+# Hybrid GPU + CPU model loading (35GB compatible)
+# --------------------------------------------------------------------
+print("Loading model with GPU/CPU partitioning... (takes a few minutes)")
+
+max_memory = {
+    0: "34GiB",     # Your 35GB MIG slice (leave ~1GB safety margin)
+    "cpu": "120GiB" # Adjust if your node RAM differs
+}
+
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
     torch_dtype=torch.bfloat16,
-    device_map="balanced",          # <-- splits model across both MIG GPUs
+    device_map="auto",
+    max_memory=max_memory,
+    offload_folder=OFFLOAD_DIR,
+    offload_state_dict=True,
     low_cpu_mem_usage=True
 )
 
 model.eval()
-print("Model loaded successfully")
+print("Model ready — running hybrid execution")
 
 # --------------------------------------------------------------------
-# FastAPI Application
+# FastAPI setup
 # --------------------------------------------------------------------
 app = FastAPI()
 
@@ -48,7 +62,7 @@ app.add_middleware(
 )
 
 # --------------------------------------------------------------------
-# Harmony Prompt Template (FORCE FINAL CHANNEL)
+# Harmony prompt template
 # --------------------------------------------------------------------
 HARMONY_TEMPLATE = """<|start|>system<|message|>
 {system_msg}
@@ -73,24 +87,23 @@ def build_prompt(system, developer, user):
         user_msg=user.strip(),
     )
 
-# --------------------------------------------------------------------
-# Extract ONLY the final channel
-# --------------------------------------------------------------------
 FINAL_RE = re.compile(r"<\|channel\|>final<\|message\|>(.*)", re.S)
 
 # --------------------------------------------------------------------
-# Inference (runs off event loop)
+# Inference
 # --------------------------------------------------------------------
 def run_inference(user_prompt: str):
 
     system_msg = "You are a world-class Earth Observation analyst. Reasoning: high."
     developer_msg = "Always respond with EO-standard terminology. NEVER output analysis, only final results."
 
-    harmony_prompt = build_prompt(system_msg, developer_msg, user_prompt)
+    prompt = build_prompt(system_msg, developer_msg, user_prompt)
 
-    # Tokenize safely across sharded GPUs
-    inputs = tokenizer(harmony_prompt, return_tensors="pt")
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    inputs = tokenizer(prompt, return_tensors="pt")
+
+    # send tensors to first execution device
+    first_device = next(model.parameters()).device
+    inputs = {k: v.to(first_device) for k, v in inputs.items()}
 
     with torch.inference_mode():
         outputs = model.generate(
@@ -102,7 +115,7 @@ def run_inference(user_prompt: str):
 
     raw = tokenizer.decode(outputs[0], skip_special_tokens=False)
 
-    # Extract final channel
+    # Extract final channel only
     m = FINAL_RE.search(raw)
     if not m:
         cleaned = re.sub(r"<\|.*?\|>", "", raw).strip()
@@ -114,15 +127,15 @@ def run_inference(user_prompt: str):
     return JSONResponse({"response": final_text})
 
 # --------------------------------------------------------------------
-# API Endpoint (non-blocking)
+# Async endpoint
 # --------------------------------------------------------------------
 @app.post("/ask_gptoss")
 async def ask_gptoss(prompt: str = Form(...)):
     return await asyncio.to_thread(run_inference, prompt)
 
 # --------------------------------------------------------------------
-# Health Endpoint
+# Health check
 # --------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"status": "GPT-OSS Final-Only Server Running"}
+    return {"status": "GPT-OSS hybrid GPU/CPU server running"}
