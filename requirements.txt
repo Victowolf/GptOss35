@@ -1,11 +1,9 @@
-transformers==4.43.3
-accelerate>=0.33.0
-safetensors>=0.4.3
-huggingface_hub>=0.23.0
-hf_transfer
-
+torch
+transformers>=4.40.0
+accelerate
+bitsandbytes
 fastapi
-uvicorn[standard]
-python-multipart
+uvicorn
 pillow
+python-multipart
 protobuf
