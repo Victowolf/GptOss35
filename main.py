@@ -13,7 +13,7 @@ MODEL_NAME = "openai/gpt-oss-20b"
 
 llm = LLM(
     model=MODEL_NAME,
-    dtype="float16",
+    dtype="bfloat16",
     gpu_memory_utilization=0.9,   # important for 35GB MIG
     max_model_len=2048            # controls KV cache
 )
