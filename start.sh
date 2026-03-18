@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "=== start.sh: create venv and install requirements ==="
+echo "=== start.sh: setup vLLM server ==="
 
 # ---------------------------
 # Create venv
@@ -10,54 +10,43 @@ if [ ! -d "venv" ]; then
   echo "[1] Creating venv..."
   python3 -m venv venv --without-pip
 
-  echo "[2] Installing pip manually inside venv..."
+  echo "[2] Installing pip..."
   curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
   ./venv/bin/python get-pip.py
   rm get-pip.py
 fi
 
 # ---------------------------
-# Activate the venv
+# Activate
 # ---------------------------
 echo "[3] Activating venv..."
 source venv/bin/activate
 
 # ---------------------------
-# Upgrade pip + install base requirements
+# Upgrade tools
 # ---------------------------
 echo "[4] Upgrading pip..."
 pip install --upgrade pip setuptools wheel
 
-echo "[5] Installing requirements..."
+# ---------------------------
+# Install PyTorch (CUDA 12.4)
+# ---------------------------
+echo "[5] Installing PyTorch..."
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+# ---------------------------
+# Install vLLM + FastAPI
+# ---------------------------
+echo "[6] Installing vLLM + dependencies..."
 pip install -r requirements.txt
 
 # ---------------------------
-# Install Transformers (GitHub latest MXFP4 support)
+# (Optional) HuggingFace auth
 # ---------------------------
-echo "[6] Installing transformers from GitHub..."
-pip install --upgrade "git+https://github.com/huggingface/transformers.git"
+export HF_HUB_ENABLE_HF_TRANSFER=1
 
 # ---------------------------
-# Install Triton + MXFP4 kernels
+# Start server
 # ---------------------------
-echo "[7] Installing Triton compiler..."
-pip install --upgrade triton==3.4.0
-
-echo "[8] Installing Triton MXFP4 kernels (critical for H200)..."
-pip install --upgrade "git+https://github.com/triton-lang/triton.git@main#subdirectory=python/triton_kernels"
-
-# ---------------------------
-# Final verification
-# ---------------------------
-echo "[9] Verifying MXFP4 availability..."
-python3 - << 'EOF'
-import importlib, triton
-print("Triton version:", triton.__version__)
-print("Has triton_kernels:", importlib.util.find_spec("triton_kernels") is not None)
-EOF
-
-# ---------------------------
-# START SERVER
-# ---------------------------
-echo "=== Starting GptOSS-20b FastAPI server ==="
+echo "=== Starting GPT-OSS vLLM server ==="
 uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1

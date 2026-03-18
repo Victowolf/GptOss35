@@ -1,30 +1,22 @@
 # main.py
-import os
 import re
-import torch
 from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from vllm import LLM, SamplingParams
 
 # --------------------------------------------------------------------
-# Disable FlashAttention (important for MIG stability)
-# --------------------------------------------------------------------
-os.environ["DISABLE_FLASH_ATTENTION"] = "1"
-
-# --------------------------------------------------------------------
-# Load GPT-OSS-20B (MXFP4 native, NO extra quantization)
+# Load GPT-OSS-20B via vLLM
 # --------------------------------------------------------------------
 MODEL_NAME = "openai/gpt-oss-20b"
 
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    device_map="auto",
-    torch_dtype=torch.float16,   # lighter than bf16
+llm = LLM(
+    model=MODEL_NAME,
+    dtype="float16",
+    gpu_memory_utilization=0.9,   # important for 35GB MIG
+    max_model_len=2048            # controls KV cache
 )
-
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
 # --------------------------------------------------------------------
 # FastAPI Application
@@ -40,7 +32,7 @@ app.add_middleware(
 )
 
 # --------------------------------------------------------------------
-# Harmony Prompt Template (FORCE FINAL CHANNEL)
+# Harmony Prompt Template (UNCHANGED)
 # --------------------------------------------------------------------
 HARMONY_TEMPLATE = """<|start|>system<|message|>
 {system_msg}
@@ -66,7 +58,7 @@ def build_prompt(system, developer, user):
     )
 
 # --------------------------------------------------------------------
-# Extract ONLY the final channel (ZERO analysis leakage)
+# Extract ONLY final channel
 # --------------------------------------------------------------------
 FINAL_RE = re.compile(
     r"<\|channel\|>final<\|message\|>(.*)",
@@ -78,27 +70,18 @@ async def ask_gptoss(prompt: str = Form(...)):
 
     system_msg = "You are a world-class Earth Observation analyst. Reasoning: high."
     developer_msg = "Always respond with EO-standard terminology. NEVER output analysis, only final results."
-    
+
     harmony_prompt = build_prompt(system_msg, developer_msg, prompt)
 
-    # Tokenize with strict truncation (CRITICAL for 35GB)
-    inputs = tokenizer(
-        harmony_prompt,
-        return_tensors="pt",
-        truncation=True,
-        max_length=768   # SAFE limit
-    ).to("cuda")
-
-    # Generate with tight limits (prevents KV explosion)
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=96,   # SAFE limit
-        do_sample=False,
+    sampling_params = SamplingParams(
+        temperature=0.0,
+        max_tokens=128   # safe for 35GB
     )
 
-    raw = tokenizer.decode(outputs[0], skip_special_tokens=False)
+    outputs = llm.generate([harmony_prompt], sampling_params)
+    raw = outputs[0].outputs[0].text
 
-    # Extract <|channel|>final
+    # Extract final channel
     m = FINAL_RE.search(raw)
     if not m:
         cleaned = re.sub(r"<\|.*?\|>", "", raw).strip()
@@ -116,4 +99,4 @@ async def ask_gptoss(prompt: str = Form(...)):
 # --------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"status": "GPT-OSS35 Final-Only Server Running"}
+    return {"status": "GPT-OSS vLLM Server Running"}

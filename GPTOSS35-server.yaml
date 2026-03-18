@@ -8,31 +8,27 @@ spec:
     spec:
       restartPolicy: Never
       containers:
-        - name: lava-rs-container
+        - name: gptoss-vllm-container
           image: nvcr.io/nvidia/pytorch:24.03-py3
           command: ["/bin/bash", "-c"]
           args:
             - |
               set -euo pipefail
-              echo "=== Starting GPT-OSS server job ==="
+              echo "=== Starting GPT-OSS vLLM server job ==="
               cd /workspace || mkdir -p /workspace && cd /workspace
 
-              # clone the repo you specified
-              rm -rf GptOss || true
-              echo "[1] Cloning Victowolf/GptOss35 ..."
+              rm -rf GptOss35 || true
+              echo "[1] Cloning repo..."
               git clone https://github.com/Victowolf/GptOss35.git
 
-              cd GptOss35 || (echo "ERROR: GptOss folder not found"; exit 1)
-               # place our files into the repo (optionally copy from a configmap or mount)
-              # If your CI already includes the files, skip the copy steps.
+              cd GptOss35 || (echo "ERROR: folder not found"; exit 1)
 
-              # make sure start.sh is executable
               chmod +x start.sh || true
 
-              echo "[4] Running start.sh ..."
+              echo "[2] Running start.sh ..."
               ./start.sh
 
-              echo "=== Gpt-oss-35 Server Exited ==="
+              echo "=== GPT-OSS vLLM Server Exited ==="
           resources:
             limits:
               nvidia.com/mig-2g.35gb: 1

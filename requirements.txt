@@ -1,9 +1,6 @@
+vllm
 torch
-transformers>=4.40.0
-accelerate
-bitsandbytes
 fastapi
 uvicorn
-pillow
 python-multipart
-protobuf
+pillow
