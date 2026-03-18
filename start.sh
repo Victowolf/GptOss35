@@ -41,7 +41,7 @@ pip install --upgrade "git+https://github.com/huggingface/transformers.git"
 # Install Triton + MXFP4 kernels
 # ---------------------------
 echo "[7] Installing Triton compiler..."
-pip install --upgrade triton==3.5.1
+pip install --upgrade triton==3.4.0
 
 echo "[8] Installing Triton MXFP4 kernels (critical for H200)..."
 pip install --upgrade "git+https://github.com/triton-lang/triton.git@main#subdirectory=python/triton_kernels"
