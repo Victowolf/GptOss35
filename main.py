@@ -5,26 +5,35 @@ import torch
 from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from transformers import pipeline
+
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig
+)
 
 # --------------------------------------------------------------------
-# Disable FlashAttention if your hardware does not support it
-# -------------------------------------------------------------------- 
-os.environ.setdefault("FLASH_ATTENTION", "1")
-os.environ.setdefault("DISABLE_FLASH_ATTENTION", "0")
-os.environ.setdefault("HF_DISABLE_FLASH_ATTENTION", "0")
+# Disable FlashAttention (better stability on MIG)
+# --------------------------------------------------------------------
+os.environ["DISABLE_FLASH_ATTENTION"] = "1"
 
 # --------------------------------------------------------------------
-# Load GPT-OSS-20B Pipeline
+# Load GPT-OSS-20B (4-bit quantized)
 # --------------------------------------------------------------------
 MODEL_NAME = "openai/gpt-oss-20b"
 
-pipe = pipeline(
-    "text-generation",
-    model=MODEL_NAME,
-    device_map="auto",
-    torch_dtype=torch.bfloat16,
+quant_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
 )
+
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_NAME,
+    quantization_config=quant_config,
+    device_map="auto",
+)
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
 # --------------------------------------------------------------------
 # FastAPI Application
@@ -81,21 +90,32 @@ async def ask_gptoss(prompt: str = Form(...)):
     
     harmony_prompt = build_prompt(system_msg, developer_msg, prompt)
 
-    # Get model output (NO prompt echo)
-    out = pipe(harmony_prompt, max_new_tokens=512, return_full_text=False, do_sample=False)
+    # Tokenize with truncation to control KV cache
+    inputs = tokenizer(
+        harmony_prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=1024   # IMPORTANT for 35GB fit
+    ).to("cuda")
 
-    raw = out[0]["generated_text"]
+    # Generate (limited tokens to control memory)
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=128,   # IMPORTANT
+        do_sample=False,
+    )
+
+    raw = tokenizer.decode(outputs[0], skip_special_tokens=False)
 
     # Extract <|channel|>final
     m = FINAL_RE.search(raw)
     if not m:
-        # fallback: remove Harmony control tokens
         cleaned = re.sub(r"<\|.*?\|>", "", raw).strip()
         return JSONResponse({"response": cleaned})
 
     final_text = m.group(1).strip()
 
-    # Remove any rogue analysis if model attempted to slip it in
+    # Remove any rogue analysis
     final_text = re.sub(r"<\|channel\|>analysis.*", "", final_text, flags=re.S).strip()
 
     return JSONResponse({"response": final_text})

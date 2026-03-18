@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gptoss-server
+  name: gptoss35-server
 spec:
   backoffLimit: 0
   template:
@@ -19,10 +19,10 @@ spec:
 
               # clone the repo you specified
               rm -rf GptOss || true
-              echo "[1] Cloning Victowolf/GptOss ..."
-              git clone https://github.com/Victowolf/GptOss.git
+              echo "[1] Cloning Victowolf/GptOss35 ..."
+              git clone https://github.com/Victowolf/GptOss35.git
 
-              cd GptOss || (echo "ERROR: GptOss folder not found"; exit 1)
+              cd GptOss35 || (echo "ERROR: GptOss folder not found"; exit 1)
                # place our files into the repo (optionally copy from a configmap or mount)
               # If your CI already includes the files, skip the copy steps.
 
@@ -32,7 +32,7 @@ spec:
               echo "[4] Running start.sh ..."
               ./start.sh
 
-              echo "=== Gpt-oss Server Exited ==="
+              echo "=== Gpt-oss-35 Server Exited ==="
           resources:
             limits:
               nvidia.com/mig-2g.35gb: 1
