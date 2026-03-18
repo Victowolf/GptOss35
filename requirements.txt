@@ -4,3 +4,4 @@ fastapi
 uvicorn
 python-multipart
 pillow
+hf_transfer

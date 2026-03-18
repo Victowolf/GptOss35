@@ -10,6 +10,9 @@ spec:
       containers:
         - name: gptoss-vllm-container
           image: nvcr.io/nvidia/pytorch:24.03-py3
+          env:
+            - name: HF_TOKEN
+              value: 
           command: ["/bin/bash", "-c"]
           args:
             - |
