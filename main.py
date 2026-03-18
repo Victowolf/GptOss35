@@ -6,31 +6,22 @@ from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig
-)
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # --------------------------------------------------------------------
-# Disable FlashAttention (better stability on MIG)
+# Disable FlashAttention (important for MIG stability)
 # --------------------------------------------------------------------
 os.environ["DISABLE_FLASH_ATTENTION"] = "1"
 
 # --------------------------------------------------------------------
-# Load GPT-OSS-20B (4-bit quantized)
+# Load GPT-OSS-20B (MXFP4 native, NO extra quantization)
 # --------------------------------------------------------------------
 MODEL_NAME = "openai/gpt-oss-20b"
 
-quant_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,
-)
-
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
-    quantization_config=quant_config,
     device_map="auto",
+    torch_dtype=torch.float16,   # lighter than bf16
 )
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -90,18 +81,18 @@ async def ask_gptoss(prompt: str = Form(...)):
     
     harmony_prompt = build_prompt(system_msg, developer_msg, prompt)
 
-    # Tokenize with truncation to control KV cache
+    # Tokenize with strict truncation (CRITICAL for 35GB)
     inputs = tokenizer(
         harmony_prompt,
         return_tensors="pt",
         truncation=True,
-        max_length=1024   # IMPORTANT for 35GB fit
+        max_length=768   # SAFE limit
     ).to("cuda")
 
-    # Generate (limited tokens to control memory)
+    # Generate with tight limits (prevents KV explosion)
     outputs = model.generate(
         **inputs,
-        max_new_tokens=128,   # IMPORTANT
+        max_new_tokens=96,   # SAFE limit
         do_sample=False,
     )
 
@@ -125,4 +116,4 @@ async def ask_gptoss(prompt: str = Form(...)):
 # --------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"status": "GPT-OSS Final-Only Server Running"}
+    return {"status": "GPT-OSS35 Final-Only Server Running"}
