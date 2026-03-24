@@ -91,7 +91,7 @@ async def ask_gptoss(prompt: str = Form(...)):
 
     sampling_params = SamplingParams(
         temperature=0.0,
-        max_tokens=1024   # safe for 35GB
+        max_tokens=384   # safe for 35GB
     )
 
     outputs = llm.generate([harmony_prompt], sampling_params)
