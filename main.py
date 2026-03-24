@@ -15,7 +15,8 @@ llm = LLM(
     model=MODEL_NAME,
     dtype="bfloat16",
     gpu_memory_utilization=0.9,   # important for 35GB MIG
-    max_model_len=2048            # controls KV cache
+    max_model_len=2048,
+    enforce_eager=True            # controls KV cache
 )
 
 # --------------------------------------------------------------------
