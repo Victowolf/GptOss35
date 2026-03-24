@@ -68,8 +68,18 @@ FINAL_RE = re.compile(
 @app.post("/ask_gptoss")
 async def ask_gptoss(prompt: str = Form(...)):
 
-    system_msg = "You are a world-class Earth Observation analyst. Reasoning: high."
-    developer_msg = "Always respond with EO-standard terminology. NEVER output analysis, only final results."
+    system_msg = """
+        You are a browser-native AI Concierge for ET.
+        Understand user intent from context and memory.
+        Map needs to relevant ET products/services.
+        Be concise, non-intrusive, and action-focused.
+    """
+    developer_msg = """
+        Return only final user-facing output (no reasoning).
+        Max 2–3 suggestions with why + next step.
+        Avoid jargon, avoid overload, no aggressive selling.
+        Use context + abstracted memory, respect privacy.
+    """
 
     harmony_prompt = build_prompt(system_msg, developer_msg, prompt)
 
