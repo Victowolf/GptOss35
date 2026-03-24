@@ -76,17 +76,22 @@ async def ask_gptoss(prompt: str = Form(...)):
         Be concise, non-intrusive, and action-focused.
     """
     developer_msg = """
-        Return only final user-facing output (no reasoning).
-        Max 2–3 suggestions with why + next step.
-        Avoid jargon, avoid overload, no aggressive selling.
-        Use context + abstracted memory, respect privacy.
+        Return only the final answer as plain text.
+
+        Rules:
+        - No JSON
+        - No markdown formatting
+        - No extra tags or system messages
+        - No reasoning or analysis
+
+        Be clear, concise, and complete.
     """
 
     harmony_prompt = build_prompt(system_msg, developer_msg, prompt)
 
     sampling_params = SamplingParams(
         temperature=0.0,
-        max_tokens=128   # safe for 35GB
+        max_tokens=1024   # safe for 35GB
     )
 
     outputs = llm.generate([harmony_prompt], sampling_params)
